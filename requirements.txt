@@ -1,0 +1,6 @@
+psutil
+rich
+# Optional/Advanced
+textual
+# keyboard
+pynput
