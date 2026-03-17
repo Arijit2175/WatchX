@@ -1,14 +1,28 @@
-from src.stats import get_system_stats
+from src.stats import get_system_stats, get_top_processes
 from src.bars import static_bar
 from rich.console import Console
 from rich.panel import Panel
 from rich.layout import Layout
 from rich.text import Text
 from rich.live import Live
+from rich.table import Table
 import time
 
 def build_dashboard():
     stats = get_system_stats()
+    processes = get_top_processes(by="cpu", limit=10)
+    proc_table = Table(title="Top Processes", show_header=True, header_style="bold blue")
+    proc_table.add_column("PID", style="cyan", width=6)
+    proc_table.add_column("Name", style="magenta")
+    proc_table.add_column("CPU %", style="green", justify="right")
+    proc_table.add_column("Mem %", style="yellow", justify="right")
+    for proc in processes:
+        proc_table.add_row(
+            str(proc.get('pid', '')),
+            str(proc.get('name', '')),
+            f"{proc.get('cpu_percent', 0):.1f}",
+            f"{proc.get('memory_percent', 0):.1f}"
+        )
     cpu_bar = static_bar(stats['cpu'], "green")
     cpu_panel = Panel(
         Text("CPU Usage\n", style="bold cyan") + cpu_bar,
@@ -49,6 +63,7 @@ def build_dashboard():
     layout = Layout()
     layout.split_column(
         Layout(name="upper", ratio=2),
+        Layout(name="middle", ratio=1),
         Layout(name="lower", ratio=1)
     )
     layout["upper"].split_row(
@@ -56,6 +71,7 @@ def build_dashboard():
         Layout(mem_panel, name="mem"),
         Layout(disk_panel, name="disk")
     )
+    layout["middle"].update(proc_table)
     layout["lower"].update(net_panel)
     return layout
 
