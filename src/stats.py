@@ -24,3 +24,19 @@ def get_disk_usage():
         'percent': disk.percent
     }
 
+def get_network_usage():
+    """Returns network I/O stats (bytes sent/received)."""
+    net = psutil.net_io_counters()
+    return {
+        'bytes_sent': net.bytes_sent,
+        'bytes_recv': net.bytes_recv
+    }
+
+def get_system_stats():
+    """Returns all system stats in a dictionary."""
+    return {
+        'cpu': get_cpu_usage(),
+        'memory': get_memory_usage(),
+        'disk': get_disk_usage(),
+        'network': get_network_usage()
+    }
