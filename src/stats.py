@@ -14,3 +14,13 @@ def get_memory_usage():
         'percent': mem.percent
     }
 
+def get_disk_usage():
+    """Returns disk usage stats for root (total, used, free, percent)."""
+    disk = psutil.disk_usage('/')
+    return {
+        'total': disk.total,
+        'used': disk.used,
+        'free': disk.free,
+        'percent': disk.percent
+    }
+
