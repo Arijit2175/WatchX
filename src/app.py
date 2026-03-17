@@ -17,11 +17,18 @@ class SystemStats(Static):
         mem = static_bar(stats['memory']['percent'], "yellow")
         disk = static_bar(stats['disk']['percent'], "magenta")
         net = stats['network']
+        gpu = stats.get('gpu', {'name': 'None', 'load': 0, 'memory': 0})
+        gpu_color = "green" if gpu['load'] < 50 else ("yellow" if gpu['load'] < 80 else "red")
+        gpu_bar = static_bar(gpu['load'], gpu_color)
+        gpu_text = Text(f"GPU  {gpu['name']}\n", style="bold cyan") + gpu_bar + Text(f"  Mem: {gpu['memory']:.1f}%", style="bold magenta")
         net_text = Text(f"Net: Sent {net['bytes_sent'] // (1024**2)} MB | Recv {net['bytes_recv'] // (1024**2)} MB", style="bold blue")
-        self.update(Text("CPU  ", style="bold cyan") + cpu + Text("\n") +
-                    Text("MEM  ", style="bold cyan") + mem + Text("\n") +
-                    Text("DISK ", style="bold cyan") + disk + Text("\n") +
-                    net_text)
+        self.update(
+            Text("CPU  ", style="bold cyan") + cpu + Text("\n") +
+            Text("MEM  ", style="bold cyan") + mem + Text("\n") +
+            Text("DISK ", style="bold cyan") + disk + Text("\n") +
+            gpu_text + Text("\n") +
+            net_text
+        )
 
 class ProcessTable(DataTable):
     def on_mount(self):
@@ -47,7 +54,10 @@ class ProcessTable(DataTable):
 class WatchXApp(App):
     TITLE = "WatchX"
     CSS_PATH = None
-    BINDINGS = [ ("q", "quit", "Quit") ]
+    BINDINGS = [ ("q", "quit", "Quit"), ("r", "refresh", "Refresh Now") ]
+    def action_refresh(self):
+        self.query_one(SystemStats).refresh_stats()
+        self.query_one(ProcessTable).refresh_table()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)

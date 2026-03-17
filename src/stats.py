@@ -1,3 +1,4 @@
+import GPUtil
 import psutil
 
 def get_top_processes(by="cpu", limit=10):
@@ -18,6 +19,21 @@ def get_top_processes(by="cpu", limit=10):
 def get_cpu_usage():
     """Returns CPU usage percentage."""
     return psutil.cpu_percent(interval=None)
+
+def get_gpu_usage():
+    """Returns GPU usage stats (load, memory, name) or 0 if no GPU found."""
+    try:
+        gpus = GPUtil.getGPUs()
+        if not gpus:
+            return {'name': 'None', 'load': 0, 'memory': 0}
+        gpu = gpus[0]
+        return {
+            'name': gpu.name,
+            'load': gpu.load * 100,  
+            'memory': gpu.memoryUtil * 100  
+        }
+    except Exception:
+        return {'name': 'None', 'load': 0, 'memory': 0}
 
 def get_memory_usage():
     """Returns memory usage stats (total, used, free, percent)."""
@@ -53,5 +69,6 @@ def get_system_stats():
         'cpu': get_cpu_usage(),
         'memory': get_memory_usage(),
         'disk': get_disk_usage(),
-        'network': get_network_usage()
+        'network': get_network_usage(),
+        'gpu': get_gpu_usage()
     }
