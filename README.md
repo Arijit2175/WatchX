@@ -59,3 +59,15 @@ It combines system-level insights, process tracking, and a visually rich interfa
 
 ---
 
+## 🛠️ Tech Stack
+
+- **Language:** Python 3
+- **TUI Framework:** Textual
+- **Terminal Rendering:** Rich
+- **System Metrics:** psutil
+- **GPU Metrics:** GPUtil
+- **ASCII Title Rendering:** pyfiglet
+- **Input Utilities:** pynput
+
+---
+
