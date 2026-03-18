@@ -131,4 +131,21 @@ WatchX works in two layers: a launcher shell and the monitoring TUI.
 
 ---
 
+## 📈 Comparison
+
+| Capability | Basic Terminal Monitor | `htop`-Style Tool | WatchX |
+|---|---|---|---|
+| Live CPU / Memory / Disk | ✅ | ✅ | ✅ |
+| Per-core CPU View | ❌ | ✅ | ✅ |
+| Network Speed + Disk I/O | ❌ | Partial | ✅ |
+| GPU Monitoring | ❌ | Partial (plugin/system dependent) | ✅ (with GPUtil) |
+| Process Search + Sort + Pagination | ❌ | Partial | ✅ |
+| Process Details Side Panel | ❌ | Partial | ✅ |
+| Launcher Command Shell | ❌ | ❌ | ✅ |
+| Health Diagnostics Command | ❌ | ❌ | ✅ |
+| Alert Thresholds + Optional Beep | ❌ | Partial | ✅ |
+| Python Extensibility for Custom Features | Partial | Partial | ✅ |
+
+---
+
 
