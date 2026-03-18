@@ -1,7 +1,7 @@
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, Static, Input
-from textual.containers import Vertical
-from src.stats import get_system_stats, get_top_processes
+from textual.binding import Binding
+from src.stats import get_system_stats
 from src.bars import static_bar
 from rich.text import Text
 import asyncio
@@ -95,9 +95,15 @@ class SystemStats(Static):
         )
 
 class ProcessTable(DataTable):
-    min_process_limit = 5
-    max_process_limit = 15
-    process_limit = 15
+    min_page_size = 10
+    max_page_size = 100
+    page_size = 25
+    current_page = 0
+    total_count = 0
+    total_pages = 1
+    sort_by = "cpu"
+    sort_desc = True
+    current_query = ""
     selected_pid = None
     follow_selected_pid = False
 
@@ -124,17 +130,61 @@ class ProcessTable(DataTable):
         self._refresh_timer = self.set_interval(3, self.refresh_table)
         await self.refresh_table()
 
-    async def refresh_table(self, search_query: str = ""):
+    def _collect_processes(self, query: str):
+        results = []
+        query = query.lower()
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+            try:
+                info = proc.info
+                name = info.get('name') or ''
+                if query and query not in str(info.get('pid', '')) and query not in name.lower():
+                    continue
+                results.append(info)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        if self.sort_by == "cpu":
+            key_fn = lambda p: p.get('cpu_percent', 0) or 0
+        elif self.sort_by == "memory":
+            key_fn = lambda p: p.get('memory_percent', 0) or 0
+        elif self.sort_by == "name":
+            key_fn = lambda p: (p.get('name') or '').lower()
+        else:
+            key_fn = lambda p: int(p.get('pid') or 0)
+
+        return sorted(results, key=key_fn, reverse=self.sort_desc)
+
+    def get_status_text(self):
+        sort_label = {
+            "cpu": "CPU%",
+            "memory": "Mem%",
+            "name": "Name",
+            "pid": "PID",
+        }.get(self.sort_by, self.sort_by)
+        direction = "Desc" if self.sort_desc else "Asc"
+        query_label = self.current_query if self.current_query else "None"
+        return (
+            f"Rows/Page: {self.page_size} | Page {self.current_page + 1}/{self.total_pages} "
+            f"| Total {self.total_count} | Sort {sort_label} {direction} | Filter {query_label}"
+        )
+
+    async def refresh_table(self, search_query: str | None = None):
+        if search_query is not None:
+            self.current_query = search_query
+
         selected_pid = self.selected_pid
         selected_row = self.cursor_row if hasattr(self, 'cursor_row') else 0
         if not self.follow_selected_pid and self.row_count and 0 <= selected_row < self.row_count:
             selected_pid = str(self.get_row_at(selected_row)[0])
             self.selected_pid = selected_pid
 
-        if search_query:
-            procs = await asyncio.to_thread(self._search_processes, search_query)
-        else:
-            procs = await asyncio.to_thread(get_top_processes, "cpu", self.process_limit)
+        all_procs = await asyncio.to_thread(self._collect_processes, self.current_query)
+        self.total_count = len(all_procs)
+        self.total_pages = max(1, (self.total_count + self.page_size - 1) // self.page_size)
+        self.current_page = min(max(0, self.current_page), self.total_pages - 1)
+        start = self.current_page * self.page_size
+        end = start + self.page_size
+        procs = all_procs[start:end]
 
         self.clear()
         for proc in procs:
@@ -155,30 +205,46 @@ class ProcessTable(DataTable):
         self.cursor_coordinate = (fallback_row, 0)
         self.selected_pid = str(self.get_row_at(fallback_row)[0])
 
-    def _search_processes(self, query: str):
-        query = query.lower()
-        results = []
-        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
-            try:
-                info = proc.info
-                if query in str(info['pid']) or query in (info['name'] or '').lower():
-                    results.append(info)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-        return sorted(results, key=lambda p: p.get('cpu_percent', 0) or 0, reverse=True)[:50]
+    async def next_page(self):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.follow_selected_pid = False
+            await self.refresh_table()
+
+    async def prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.follow_selected_pid = False
+            await self.refresh_table()
+
+    async def set_sort(self, sort_by: str):
+        if sort_by == self.sort_by:
+            self.sort_desc = not self.sort_desc
+        else:
+            self.sort_by = sort_by
+            self.sort_desc = sort_by in {"cpu", "memory"}
+        self.current_page = 0
+        self.follow_selected_pid = False
+        await self.refresh_table()
 
 class WatchXApp(App):
     TITLE = "WatchX"
     CSS_PATH = None
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh", "Refresh"),
-        ("k", "kill_process", "Kill Process"),
-        ("s", "focus_search", "Search"),
-        ("escape", "clear_search", "Clear Search"),
-        ("=", "increase_process_limit", "More"),
-        ("-", "decrease_process_limit", "Less"),
-        ("m", "command_palette", "Menu"),
+        Binding("q", "quit", "Quit"),
+        Binding("k", "kill_process", "Kill"),
+        Binding("s", "focus_search", "Search"),
+        Binding("[", "prev_page", "Prev Page"),
+        Binding("]", "next_page", "Next Page"),
+        Binding("1", "sort_cpu", "CPU Sort"),
+        Binding("2", "sort_memory", "Mem Sort"),
+        Binding("3", "sort_name", "Name Sort"),
+        Binding("4", "sort_pid", "PID Sort"),
+        Binding("m", "command_palette", "Menu"),
+        Binding("r", "refresh", "Refresh", show=False),
+        Binding("escape", "clear_search", "Clear Search", show=False),
+        Binding("=", "increase_page_size", "More Rows", show=False),
+        Binding("-", "decrease_page_size", "Fewer Rows", show=False),
     ]
 
     async def action_kill_process(self):
@@ -210,6 +276,7 @@ class WatchXApp(App):
         await table.refresh_table(search_query=query)
         if not query:
             table._refresh_timer.resume()
+        self.set_status_text(table.get_status_text())
 
     def on_key(self, event):
         if event.key in {"up", "down", "pageup", "pagedown", "home", "end"}:
@@ -222,6 +289,12 @@ class WatchXApp(App):
         footer = self.query(Footer).first()
         if footer:
             footer.text = text
+
+    def set_status_text(self, text):
+        status_line = self.query_one("#status_line", Static)
+        status_line.update(
+            f"Rows: = More / - Fewer | Pages: [ Prev / ] Next | Sort: 1 CPU 2 Memory 3 Name 4 PID | {text}"
+        )
             
     def action_focus_search(self):
         self.query_one("#search").focus()
@@ -229,52 +302,93 @@ class WatchXApp(App):
     async def action_clear_search(self):
         search = self.query_one("#search", Input)
         search.value = ""
-        self.query_one(ProcessTable).follow_selected_pid = False
-        self.query_one(ProcessTable)._refresh_timer.resume()
-        await self.query_one(ProcessTable).refresh_table()
-        self.query_one(ProcessTable).focus()
+        table = self.query_one(ProcessTable)
+        table.follow_selected_pid = False
+        table.current_page = 0
+        table._refresh_timer.resume()
+        await table.refresh_table(search_query="")
+        self.set_status_text(table.get_status_text())
+        table.focus()
 
     async def on_input_changed(self, event: Input.Changed):
         if event.input.id == "search":
             query = event.value.strip()
             table = self.query_one(ProcessTable)
-            table._refresh_timer.pause()
+            table.current_page = 0
+            if query:
+                table._refresh_timer.pause()
+            else:
+                table._refresh_timer.resume()
             await table.refresh_table(search_query=query)
+            self.set_status_text(table.get_status_text())
 
     async def action_refresh(self):
         await self.query_one(SystemStats).refresh_stats()
         query = self.query_one("#search", Input).value.strip()
-        await self.query_one(ProcessTable).refresh_table(search_query=query)
-
-    async def action_increase_process_limit(self):
         table = self.query_one(ProcessTable)
-        if table.process_limit < table.max_process_limit:
-            table.process_limit += 1
-            await table.refresh_table()
-            self.set_footer_text(f"Showing top {table.process_limit} processes")
-        else:
-            self.set_footer_text(f"Process limit already at max ({table.max_process_limit})")
+        await table.refresh_table(search_query=query)
+        self.set_status_text(table.get_status_text())
 
-    async def action_decrease_process_limit(self):
+    async def action_increase_page_size(self):
         table = self.query_one(ProcessTable)
-        if table.process_limit > table.min_process_limit:
-            table.process_limit -= 1
+        if table.page_size < table.max_page_size:
+            table.page_size += 5
             await table.refresh_table()
-            self.set_footer_text(f"Showing top {table.process_limit} processes")
+            self.set_status_text(table.get_status_text())
         else:
-            self.set_footer_text(f"Process limit already at min ({table.min_process_limit})")
+            self.set_footer_text(f"Rows/Page already at max ({table.max_page_size})")
+
+    async def action_decrease_page_size(self):
+        table = self.query_one(ProcessTable)
+        if table.page_size > table.min_page_size:
+            table.page_size -= 5
+            await table.refresh_table()
+            self.set_status_text(table.get_status_text())
+        else:
+            self.set_footer_text(f"Rows/Page already at min ({table.min_page_size})")
+
+    async def action_next_page(self):
+        table = self.query_one(ProcessTable)
+        await table.next_page()
+        self.set_status_text(table.get_status_text())
+
+    async def action_prev_page(self):
+        table = self.query_one(ProcessTable)
+        await table.prev_page()
+        self.set_status_text(table.get_status_text())
+
+    async def action_sort_cpu(self):
+        table = self.query_one(ProcessTable)
+        await table.set_sort("cpu")
+        self.set_status_text(table.get_status_text())
+
+    async def action_sort_memory(self):
+        table = self.query_one(ProcessTable)
+        await table.set_sort("memory")
+        self.set_status_text(table.get_status_text())
+
+    async def action_sort_name(self):
+        table = self.query_one(ProcessTable)
+        await table.set_sort("name")
+        self.set_status_text(table.get_status_text())
+
+    async def action_sort_pid(self):
+        table = self.query_one(ProcessTable)
+        await table.set_sort("pid")
+        self.set_status_text(table.get_status_text())
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield SystemStats()
         yield Input(placeholder="Search by name or PID... (press s)", id="search")
+        yield Static("", id="status_line")
         yield ProcessTable(id="proc_table")
         yield Footer()
 
     def on_mount(self):
         self.set_focus(self.query_one("#proc_table"))
         table = self.query_one(ProcessTable)
-        self.set_footer_text(f"Showing top {table.process_limit} processes")
+        self.set_status_text(table.get_status_text())
 
 if __name__ == "__main__":
     WatchXApp().run()
