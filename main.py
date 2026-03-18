@@ -196,12 +196,18 @@ def _show_help() -> None:
 
 
 def _show_health() -> None:
-    dependencies = ["psutil", "gputil", "rich", "textual", "pyfiglet"]
+    dependencies = [
+        ("psutil", "psutil"),
+        ("gputil", "GPUtil"),
+        ("rich", "rich"),
+        ("textual", "textual"),
+        ("pyfiglet", "pyfiglet"),
+    ]
     dep_lines = []
-    for dep in dependencies:
-        available = importlib.util.find_spec(dep) is not None
+    for dep_label, module_name in dependencies:
+        available = importlib.util.find_spec(module_name) is not None
         icon = "✅" if available else "❌"
-        dep_lines.append(f"{icon} {dep}")
+        dep_lines.append(f"{icon} {dep_label}")
 
     terminal_type = "TTY" if console.is_terminal else "Non-TTY"
     color_support = str(console.color_system or "none")
