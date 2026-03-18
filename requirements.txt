@@ -3,3 +3,4 @@ gputil
 rich
 textual
 pynput
+pyfiglet
