@@ -1,12 +1,40 @@
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, Static, Input
 from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
 from src.stats import get_system_stats
 from src.bars import static_bar
 from rich.text import Text
 import asyncio
 import psutil
+import time
 from collections import deque
+from datetime import datetime
+
+
+def _format_seconds(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _get_process_details(pid: int):
+    proc = psutil.Process(pid)
+    with proc.oneshot():
+        started = datetime.fromtimestamp(proc.create_time())
+        uptime = _format_seconds((datetime.now() - started).total_seconds())
+        return {
+            "pid": proc.pid,
+            "name": proc.name(),
+            "status": proc.status(),
+            "cpu": proc.cpu_percent(interval=None),
+            "memory": proc.memory_percent(),
+            "threads": proc.num_threads(),
+            "started": started.strftime("%Y-%m-%d %H:%M:%S"),
+            "uptime": uptime,
+            "cmd": " ".join(proc.cmdline())[:200] if proc.cmdline() else "N/A",
+        }
 
 class SystemStats(Static):
     def __init__(self, *args, **kwargs):
@@ -94,6 +122,61 @@ class SystemStats(Static):
             net_trend
         )
 
+
+class ProcessDetails(Static):
+    can_focus = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_pid = None
+        self._cache = {}
+        self._cache_ttl = 2.0
+        self._last_render_at = 0.0
+
+    async def show_pid(self, pid: int | None):
+        now = time.monotonic()
+
+        if pid is None:
+            self.last_pid = None
+            self._last_render_at = now
+            self.update(
+                "[b]Selected Process[/b]\n"
+                "No process selected.\n"
+                "Use arrow keys or click a row in the process table."
+            )
+            return
+
+        if self.last_pid == pid and (now - self._last_render_at) < 1.2:
+            return
+
+        try:
+            cached = self._cache.get(pid)
+            if cached and (now - cached[0]) < self._cache_ttl:
+                details = cached[1]
+            else:
+                details = await asyncio.to_thread(_get_process_details, pid)
+                self._cache[pid] = (now, details)
+
+            self.last_pid = pid
+            self._last_render_at = now
+            self.update(
+                "[b]Selected Process[/b]\n"
+                f"PID: {details['pid']}\n"
+                f"Name: {details['name']}\n"
+                f"Status: {details['status']}\n"
+                f"CPU: {details['cpu']:.1f}%\n"
+                f"Memory: {details['memory']:.1f}%\n"
+                f"Threads: {details['threads']}\n"
+                f"Started: {details['started']}\n"
+                f"Uptime: {details['uptime']}\n"
+                f"Cmd: {details['cmd']}"
+            )
+        except Exception as e:
+            self.last_pid = None
+            self._cache.pop(pid, None)
+            self._last_render_at = now
+            self.update(f"[b]Selected Process[/b]\nUnavailable: {e}")
+
 class ProcessTable(DataTable):
     min_page_size = 10
     max_page_size = 100
@@ -106,15 +189,22 @@ class ProcessTable(DataTable):
     current_query = ""
     selected_pid = None
     follow_selected_pid = False
+    last_interaction_ts = 0.0
+
+    def mark_interaction(self):
+        self.last_interaction_ts = time.monotonic()
 
     async def on_click(self, event):
         style_meta = getattr(event.style, 'meta', {}) if hasattr(event.style, 'meta') else {}
         row = style_meta.get('row') if isinstance(style_meta, dict) else None
         if row is not None and 0 <= row < self.row_count:
+            self.mark_interaction()
             self.cursor_coordinate = (row, 0)
             self.selected_pid = str(self.get_row_at(row)[0])
             self.follow_selected_pid = True
             self._refresh_timer.pause()
+            if hasattr(self.app, "refresh_selected_process_details"):
+                await self.app.refresh_selected_process_details()
 
     def _select_pid_if_present(self, pid):
         for row_index in range(self.row_count):
@@ -128,7 +218,8 @@ class ProcessTable(DataTable):
         self.cursor_type = "row"
         self.add_columns("PID", "Name", "CPU %", "Mem %")
         self._refresh_timer = self.set_interval(3, self.refresh_table)
-        await self.refresh_table()
+        self._last_render_signature = None
+        await self.refresh_table(force=True)
 
     def _collect_processes(self, query: str):
         results = []
@@ -168,9 +259,12 @@ class ProcessTable(DataTable):
             f"| Total {self.total_count} | Sort {sort_label} {direction} | Filter {query_label}"
         )
 
-    async def refresh_table(self, search_query: str | None = None):
+    async def refresh_table(self, search_query: str | None = None, force: bool = False):
         if search_query is not None:
             self.current_query = search_query
+
+        if not force and search_query is None and (time.monotonic() - self.last_interaction_ts) < 0.4:
+            return
 
         selected_pid = self.selected_pid
         selected_row = self.cursor_row if hasattr(self, 'cursor_row') else 0
@@ -186,14 +280,31 @@ class ProcessTable(DataTable):
         end = start + self.page_size
         procs = all_procs[start:end]
 
-        self.clear()
-        for proc in procs:
-            self.add_row(
+        rows = [
+            (
                 str(proc.get('pid', '')),
                 str(proc.get('name', '')),
                 f"{proc.get('cpu_percent', 0):.1f}",
-                f"{proc.get('memory_percent', 0):.1f}"
+                f"{proc.get('memory_percent', 0):.1f}",
             )
+            for proc in procs
+        ]
+
+        render_signature = (
+            self.current_query,
+            self.current_page,
+            self.page_size,
+            self.sort_by,
+            self.sort_desc,
+            tuple(rows),
+        )
+
+        if render_signature != self._last_render_signature:
+            self.clear()
+            for row in rows:
+                self.add_row(*row)
+            self._last_render_signature = render_signature
+
         if not self.row_count:
             self.selected_pid = None
             return
@@ -207,17 +318,20 @@ class ProcessTable(DataTable):
 
     async def next_page(self):
         if self.current_page < self.total_pages - 1:
+            self.mark_interaction()
             self.current_page += 1
             self.follow_selected_pid = False
-            await self.refresh_table()
+            await self.refresh_table(force=True)
 
     async def prev_page(self):
         if self.current_page > 0:
+            self.mark_interaction()
             self.current_page -= 1
             self.follow_selected_pid = False
-            await self.refresh_table()
+            await self.refresh_table(force=True)
 
     async def set_sort(self, sort_by: str):
+        self.mark_interaction()
         if sort_by == self.sort_by:
             self.sort_desc = not self.sort_desc
         else:
@@ -225,15 +339,59 @@ class ProcessTable(DataTable):
             self.sort_desc = sort_by in {"cpu", "memory"}
         self.current_page = 0
         self.follow_selected_pid = False
-        await self.refresh_table()
+        await self.refresh_table(force=True)
 
 class WatchXApp(App):
     TITLE = "WatchX"
     CSS_PATH = None
+    CSS = """
+    #search {
+        height: 3;
+    }
+
+    #status_line {
+        height: 1;
+        color: cyan;
+    }
+
+    #main_row {
+        height: 1fr;
+    }
+
+    #left_panel {
+        width: 3fr;
+        padding-right: 1;
+    }
+
+    #right_panel {
+        width: 2fr;
+        border: round $accent;
+        padding: 1 1;
+    }
+
+    #proc_table {
+        border: round $panel;
+    }
+
+    #proc_table:focus {
+        border: round $success;
+    }
+
+    #proc_details {
+        height: 1fr;
+        border: round $panel;
+    }
+
+    #proc_details:focus {
+        border: round $warning;
+    }
+    """
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("k", "kill_process", "Kill"),
         Binding("s", "focus_search", "Search"),
+        Binding("t", "focus_table", "Table"),
+        Binding("d", "focus_details", "Details"),
         Binding("[", "prev_page", "Prev Page"),
         Binding("]", "next_page", "Next Page"),
         Binding("1", "sort_cpu", "CPU Sort"),
@@ -249,6 +407,7 @@ class WatchXApp(App):
 
     async def action_kill_process(self):
         table = self.query_one(ProcessTable)
+        table.mark_interaction()
         pid_str = None
         row_idx = table.cursor_row if hasattr(table, 'cursor_row') else 0
         if table.row_count and 0 <= row_idx < table.row_count:
@@ -273,17 +432,29 @@ class WatchXApp(App):
         table.selected_pid = None
         table.follow_selected_pid = False
         query = self.query_one("#search", Input).value.strip()
-        await table.refresh_table(search_query=query)
+        await table.refresh_table(search_query=query, force=True)
         if not query:
             table._refresh_timer.resume()
         self.set_status_text(table.get_status_text())
+        await self.refresh_selected_process_details()
 
-    def on_key(self, event):
+    async def on_key(self, event):
         if event.key in {"up", "down", "pageup", "pagedown", "home", "end"}:
             focused = self.focused
             if isinstance(focused, ProcessTable):
+                focused.mark_interaction()
                 focused.follow_selected_pid = False
                 focused._refresh_timer.resume()
+                await self.refresh_selected_process_details()
+
+    def action_focus_table(self):
+        self.query_one("#proc_table").focus()
+        self.set_footer_text("Focus: Process Table")
+
+    async def action_focus_details(self):
+        await self.refresh_selected_process_details()
+        self.query_one("#proc_details").focus()
+        self.set_footer_text("Focus: Process Details")
 
     def set_footer_text(self, text):
         footer = self.query(Footer).first()
@@ -303,10 +474,11 @@ class WatchXApp(App):
         search = self.query_one("#search", Input)
         search.value = ""
         table = self.query_one(ProcessTable)
+        table.mark_interaction()
         table.follow_selected_pid = False
         table.current_page = 0
         table._refresh_timer.resume()
-        await table.refresh_table(search_query="")
+        await table.refresh_table(search_query="", force=True)
         self.set_status_text(table.get_status_text())
         table.focus()
 
@@ -314,36 +486,43 @@ class WatchXApp(App):
         if event.input.id == "search":
             query = event.value.strip()
             table = self.query_one(ProcessTable)
+            table.mark_interaction()
             table.current_page = 0
             if query:
                 table._refresh_timer.pause()
             else:
                 table._refresh_timer.resume()
-            await table.refresh_table(search_query=query)
+            await table.refresh_table(search_query=query, force=True)
             self.set_status_text(table.get_status_text())
+            await self.refresh_selected_process_details()
 
     async def action_refresh(self):
         await self.query_one(SystemStats).refresh_stats()
         query = self.query_one("#search", Input).value.strip()
         table = self.query_one(ProcessTable)
-        await table.refresh_table(search_query=query)
+        await table.refresh_table(search_query=query, force=True)
         self.set_status_text(table.get_status_text())
+        await self.refresh_selected_process_details()
 
     async def action_increase_page_size(self):
         table = self.query_one(ProcessTable)
+        table.mark_interaction()
         if table.page_size < table.max_page_size:
             table.page_size += 5
-            await table.refresh_table()
+            await table.refresh_table(force=True)
             self.set_status_text(table.get_status_text())
+            await self.refresh_selected_process_details()
         else:
             self.set_footer_text(f"Rows/Page already at max ({table.max_page_size})")
 
     async def action_decrease_page_size(self):
         table = self.query_one(ProcessTable)
+        table.mark_interaction()
         if table.page_size > table.min_page_size:
             table.page_size -= 5
-            await table.refresh_table()
+            await table.refresh_table(force=True)
             self.set_status_text(table.get_status_text())
+            await self.refresh_selected_process_details()
         else:
             self.set_footer_text(f"Rows/Page already at min ({table.min_page_size})")
 
@@ -351,44 +530,74 @@ class WatchXApp(App):
         table = self.query_one(ProcessTable)
         await table.next_page()
         self.set_status_text(table.get_status_text())
+        await self.refresh_selected_process_details()
 
     async def action_prev_page(self):
         table = self.query_one(ProcessTable)
         await table.prev_page()
         self.set_status_text(table.get_status_text())
+        await self.refresh_selected_process_details()
 
     async def action_sort_cpu(self):
         table = self.query_one(ProcessTable)
         await table.set_sort("cpu")
         self.set_status_text(table.get_status_text())
+        await self.refresh_selected_process_details()
 
     async def action_sort_memory(self):
         table = self.query_one(ProcessTable)
         await table.set_sort("memory")
         self.set_status_text(table.get_status_text())
+        await self.refresh_selected_process_details()
 
     async def action_sort_name(self):
         table = self.query_one(ProcessTable)
         await table.set_sort("name")
         self.set_status_text(table.get_status_text())
+        await self.refresh_selected_process_details()
 
     async def action_sort_pid(self):
         table = self.query_one(ProcessTable)
         await table.set_sort("pid")
         self.set_status_text(table.get_status_text())
+        await self.refresh_selected_process_details()
+
+    async def refresh_selected_process_details(self):
+        table = self.query_one(ProcessTable)
+        details = self.query_one("#proc_details", ProcessDetails)
+        pid = None
+        row_idx = table.cursor_row if hasattr(table, 'cursor_row') else 0
+        if table.row_count and 0 <= row_idx < table.row_count:
+            try:
+                pid = int(str(table.get_row_at(row_idx)[0]))
+            except Exception:
+                pid = None
+        elif table.selected_pid:
+            try:
+                pid = int(table.selected_pid)
+            except Exception:
+                pid = None
+
+        await details.show_pid(pid)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield SystemStats()
-        yield Input(placeholder="Search by name or PID... (press s)", id="search")
-        yield Static("", id="status_line")
-        yield ProcessTable(id="proc_table")
+        with Horizontal(id="main_row"):
+            with Vertical(id="left_panel"):
+                yield Input(placeholder="Search by name or PID... (press s)", id="search")
+                yield Static("", id="status_line")
+                yield ProcessTable(id="proc_table")
+            with Vertical(id="right_panel"):
+                yield ProcessDetails(id="proc_details")
         yield Footer()
 
-    def on_mount(self):
+    async def on_mount(self):
         self.set_focus(self.query_one("#proc_table"))
         table = self.query_one(ProcessTable)
         self.set_status_text(table.get_status_text())
+        await self.refresh_selected_process_details()
+        self.set_interval(0.6, self.refresh_selected_process_details)
 
 if __name__ == "__main__":
     WatchXApp().run()
