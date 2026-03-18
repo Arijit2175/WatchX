@@ -211,3 +211,4 @@ WatchX is built with a modular, responsiveness-first approach to keep terminal m
 
 <br>
 
+👨‍💻 **Developed by** - @Arijit2175
