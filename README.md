@@ -121,4 +121,14 @@ WatchX works in two layers: a launcher shell and the monitoring TUI.
 
 ---
 
+## 👀 Preview
+
+### Launcher Shell
+![WatchX Launcher](./screenshots/launcher.png)
+
+### Live Monitor Dashboard
+![WatchX Dashboard](./screenshots/dashboard.png)
+
+---
+
 
