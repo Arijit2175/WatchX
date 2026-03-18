@@ -71,3 +71,23 @@ It combines system-level insights, process tracking, and a visually rich interfa
 
 ---
 
+## 🗂️ Project Structure
+
+```
+WatchX/
+├── src/
+│   ├── app.py
+│   ├── bars.py
+│   ├── dashboard.py
+│   └── stats.py
+├── tests/
+│   └── test_bars.py
+├── main.py
+├── requirements.txt
+├── .gitignore
+└── README.md
+```
+
+---
+
+
