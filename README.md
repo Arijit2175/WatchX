@@ -148,4 +148,35 @@ WatchX works in two layers: a launcher shell and the monitoring TUI.
 
 ---
 
+## 🧭 Approach
+
+WatchX is built with a modular, responsiveness-first approach to keep terminal monitoring both informative and smooth.
+
+### 1) Layered Architecture
+- `main.py` handles the launcher shell and command flow.
+- `src/stats.py` focuses on collecting system and process metrics.
+- `src/app.py` orchestrates Textual UI composition, interactions, and state.
+- Utility modules (bars/dashboard helpers) keep rendering logic reusable.
+
+### 2) UX-First Interaction Model
+- Keyboard and mouse actions are both first-class.
+- Process selection is tracked by PID for stability during sorting/filtering updates.
+- Focus controls and clear feedback lines reduce accidental actions.
+
+### 3) Performance-Driven Update Strategy
+- Blocking metric calls are isolated from the UI refresh path.
+- Table updates are diff-aware to minimize flicker and redraw cost.
+- Lightweight caching is used for selected-process details.
+
+### 4) Reliability & Safety
+- Process-kill actions operate on explicit selected PID context.
+- Health diagnostics validate runtime and dependency readiness.
+- Alert thresholds provide early warning for sustained system pressure.
+
+### 5) Extensible by Design
+- Python-based codebase makes feature iteration straightforward.
+- New metrics, alert rules, and UI actions can be added with minimal coupling.
+
+---
+
 
