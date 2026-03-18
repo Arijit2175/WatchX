@@ -124,10 +124,10 @@ WatchX works in two layers: a launcher shell and the monitoring TUI.
 ## 👀 Preview
 
 ### Launcher Shell
-![WatchX Launcher](./screenshots/launcher.png)
+![WatchX Launcher](./assets/launcher.png)
 
 ### Live Monitor Dashboard
-![WatchX Dashboard](./screenshots/dashboard.png)
+![WatchX Dashboard](./assets/dashboard.png)
 
 ---
 
@@ -176,6 +176,16 @@ WatchX is built with a modular, responsiveness-first approach to keep terminal m
 ### 5) Extensible by Design
 - Python-based codebase makes feature iteration straightforward.
 - New metrics, alert rules, and UI actions can be added with minimal coupling.
+
+---
+
+## 🛣️ Roadmap
+
+- Export snapshots (JSON/CSV) for system and process stats
+- Configurable alert profiles (dev/laptop/server presets)
+- Historical charts for CPU, memory, network, and disk activity
+- Safer process actions with confirmation modes and role-based controls
+- Plugin hooks for custom widgets and third-party metric providers
 
 ---
 
