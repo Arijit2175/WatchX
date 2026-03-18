@@ -189,4 +189,25 @@ WatchX is built with a modular, responsiveness-first approach to keep terminal m
 
 ---
 
+## 📚 References
+
+1. P. Charan Sai et al., “Real-Time Task Manager: A Python-Based Approach Using Psutil and Tkinter,” IEEE CSITSS, 2024.  
+	→ Demonstrates real-time system monitoring using Python and process-level metrics like CPU and memory.
+
+2. Parvathy M. et al., “Real-Time Web Server Monitoring System using Python,” Journal of Artificial Intelligence and Capsule Networks, 2024.  
+	→ Explores real-time monitoring of CPU, memory, and response time in production systems.
+
+3. Giampaolo Rodolà, psutil Documentation, PyPI / GitHub.  
+	→ Defines system-level monitoring APIs for CPU, memory, disk, and processes.
+
+4. “Psutil Module in Python,” GeeksforGeeks, 2025.  
+	→ Overview of system resource tracking and process monitoring techniques.
+
+5. Cândido et al., “Log-based Software Monitoring: A Systematic Mapping Study,” arXiv, 2019.  
+	→ Highlights the importance of monitoring systems for performance analysis and reliability.
+
+6. Manickavasagam et al., “Real-Time Monitoring Systems in Python Environments,” 2024.  
+	→ Discusses scalable monitoring architectures and real-time data visualization.
+
+<br>
 
