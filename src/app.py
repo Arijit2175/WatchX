@@ -226,9 +226,9 @@ class ProcessDetails(Static):
             self.update(f"[b]Selected Process[/b]\nUnavailable: {e}")
 
 class ProcessTable(DataTable):
-    min_page_size = 10
-    max_page_size = 100
-    page_size = 25
+    min_page_size = 5
+    max_page_size = 15
+    page_size = 10
     current_page = 0
     total_count = 0
     total_pages = 1
@@ -250,7 +250,6 @@ class ProcessTable(DataTable):
             self.cursor_coordinate = (row, 0)
             self.selected_pid = str(self.get_row_at(row)[0])
             self.follow_selected_pid = True
-            self._refresh_timer.pause()
             if hasattr(self.app, "refresh_selected_process_details"):
                 await self.app.refresh_selected_process_details()
 
@@ -321,6 +320,13 @@ class ProcessTable(DataTable):
             self.selected_pid = selected_pid
 
         all_procs = await asyncio.to_thread(self._collect_processes, self.current_query)
+
+        if self.follow_selected_pid and self.selected_pid:
+            for idx, proc in enumerate(all_procs):
+                if str(proc.get("pid", "")) == str(self.selected_pid):
+                    self.current_page = idx // self.page_size
+                    break
+
         self.total_count = len(all_procs)
         self.total_pages = max(1, (self.total_count + self.page_size - 1) // self.page_size)
         self.current_page = min(max(0, self.current_page), self.total_pages - 1)
