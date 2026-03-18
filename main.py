@@ -1,5 +1,7 @@
 import argparse
+import importlib.util
 import random
+import sys
 import time
 from typing import Optional
 
@@ -82,8 +84,9 @@ def _build_landing(title_mode: str = "normal", command_buffer: str = "", frame: 
         "\n".join(
             [
                 "[bold yellow]Commands[/bold yellow]",
-                "[green]start[/green] / [green]run[/green]  Launch monitor",
+                "[green]start[/green] / [green]run[/green]        Launch monitor",
                 "[green]help[/green]               Command guide",
+                "[green]health[/green]             Runtime diagnostics",
                 "[green]about[/green]              Project info",
                 "[green]clear[/green]              Redraw screen",
                 "[green]quit[/green]               Exit launcher",
@@ -113,6 +116,17 @@ def _build_landing(title_mode: str = "normal", command_buffer: str = "", frame: 
 
 def _show_landing() -> None:
     console.print(_build_landing("normal", "", 0))
+
+
+def _hard_clear_terminal() -> None:
+    """Clear visible screen and, where supported, clear terminal scrollback."""
+    console.clear()
+    try:
+        # ESC[2J: clear screen, ESC[3J: clear scrollback, ESC[H: cursor home
+        console.file.write("\x1b[2J\x1b[3J\x1b[H")
+        console.file.flush()
+    except Exception:
+        pass
 
 
 def _read_char_nonblocking() -> Optional[str]:
@@ -171,6 +185,7 @@ def _show_help() -> None:
                 "[bold cyan]WatchX Commands[/bold cyan]",
                 "[green]start[/green] / [green]run[/green]     Launch system monitor",
                 "[green]help[/green]              Show this command guide",
+                "[green]health[/green]            Show Python/dependency/terminal diagnostics",
                 "[green]about[/green]             Show project info",
                 "[green]clear[/green]             Clear terminal and redraw landing",
                 "[green]quit[/green] / [green]exit[/green]     Exit WatchX launcher",
@@ -178,6 +193,36 @@ def _show_help() -> None:
         )
     )
     console.print(Panel(help_text, title="Usage", border_style="cyan"))
+
+
+def _show_health() -> None:
+    dependencies = ["psutil", "gputil", "rich", "textual", "pyfiglet"]
+    dep_lines = []
+    for dep in dependencies:
+        available = importlib.util.find_spec(dep) is not None
+        icon = "✅" if available else "❌"
+        dep_lines.append(f"{icon} {dep}")
+
+    terminal_type = "TTY" if console.is_terminal else "Non-TTY"
+    color_support = str(console.color_system or "none")
+    unicode_ok = "Yes" if console.encoding and "UTF" in console.encoding.upper() else "Maybe"
+
+    health_text = Text.from_markup(
+        "\n".join(
+            [
+                "[bold cyan]WatchX Health[/bold cyan]",
+                f"Python: {sys.version.split()[0]}",
+                f"Platform: {sys.platform}",
+                f"Terminal: {terminal_type}",
+                f"Color Support: {color_support}",
+                f"Unicode Support: {unicode_ok} ({console.encoding})",
+                "",
+                "[bold yellow]Dependencies[/bold yellow]",
+                *dep_lines,
+            ]
+        )
+    )
+    console.print(Panel(health_text, title="Health", border_style="green"))
 
 
 def _show_about() -> None:
@@ -225,8 +270,12 @@ def _run_shell() -> None:
             _show_about()
             continue
 
+        if command == "health":
+            _show_health()
+            continue
+
         if command == "clear":
-            console.clear()
+            _hard_clear_terminal()
             continue
 
         if command in {"quit", "exit"}:

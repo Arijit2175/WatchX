@@ -37,10 +37,26 @@ def _get_process_details(pid: int):
         }
 
 class SystemStats(Static):
+    CPU_WARN = 80
+    CPU_CRIT = 95
+    MEM_WARN = 80
+    MEM_CRIT = 95
+    DISK_WARN = 85
+    DISK_CRIT = 95
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.cpu_history = deque(maxlen=24)
         self.net_history = deque(maxlen=24)
+        self.prev_alerts = {"cpu": False, "memory": False, "disk": False}
+
+    @staticmethod
+    def _level_color(value: float, warn: float, crit: float) -> str:
+        if value >= crit:
+            return "red"
+        if value >= warn:
+            return "yellow"
+        return "green"
 
     def _sparkline(self, values):
         if not values:
@@ -74,9 +90,13 @@ class SystemStats(Static):
                 unit_index += 1
             return f"{value:.1f} {units[unit_index]}"
 
-        cpu = static_bar(stats['cpu'], "green")
-        mem = static_bar(stats['memory']['percent'], "yellow")
-        disk = static_bar(stats['disk']['percent'], "magenta")
+        cpu_value = float(stats['cpu'])
+        mem_value = float(stats['memory']['percent'])
+        disk_value = float(stats['disk']['percent'])
+
+        cpu = static_bar(cpu_value, self._level_color(cpu_value, self.CPU_WARN, self.CPU_CRIT))
+        mem = static_bar(mem_value, self._level_color(mem_value, self.MEM_WARN, self.MEM_CRIT))
+        disk = static_bar(disk_value, self._level_color(disk_value, self.DISK_WARN, self.DISK_CRIT))
         net = stats['network']
         net_speed = stats.get('network_speed', {'upload_per_sec': 0.0, 'download_per_sec': 0.0})
         disk_io = stats.get('disk_io', {'read_bytes': 0, 'write_bytes': 0})
@@ -101,6 +121,33 @@ class SystemStats(Static):
         cpu_trend = Text(f"CPU Trend: {self._sparkline(list(self.cpu_history))}", style="bright_green")
         net_trend = Text(f"Net Trend: {self._sparkline(list(self.net_history))}", style="bright_blue")
 
+        current_alerts = {
+            "cpu": cpu_value >= self.CPU_WARN,
+            "memory": mem_value >= self.MEM_WARN,
+            "disk": disk_value >= self.DISK_WARN,
+        }
+
+        alert_tokens = []
+        if current_alerts["cpu"]:
+            alert_tokens.append(f"CPU {cpu_value:.0f}%")
+        if current_alerts["memory"]:
+            alert_tokens.append(f"MEM {mem_value:.0f}%")
+        if current_alerts["disk"]:
+            alert_tokens.append(f"DISK {disk_value:.0f}%")
+
+        if alert_tokens:
+            alert_text = Text("ALERT: " + " | ".join(alert_tokens), style="bold red")
+        else:
+            alert_text = Text("ALERT: Normal", style="bold green")
+
+        newly_triggered = any(current_alerts[k] and not self.prev_alerts.get(k, False) for k in current_alerts)
+        self.prev_alerts = current_alerts
+        if newly_triggered and getattr(self.app, "alert_beep_enabled", False):
+            try:
+                self.app.bell()
+            except Exception:
+                print("\a", end="", flush=True)
+
         net_text = Text(
             f"Net: Sent {_fmt_bytes(net['bytes_sent'])} | Recv {_fmt_bytes(net['bytes_recv'])} "
             f"| Up {_fmt_rate(net_speed['upload_per_sec'])} | Down {_fmt_rate(net_speed['download_per_sec'])}",
@@ -113,6 +160,7 @@ class SystemStats(Static):
         self.update(
             Text("CPU  ", style="bold cyan") + cpu + Text("\n") +
             cpu_trend + Text("\n") +
+            alert_text + Text("\n") +
             core_text + Text("\n") +
             Text("MEM  ", style="bold cyan") + mem + Text("\n") +
             Text("DISK ", style="bold cyan") + disk + Text("\n") +
@@ -389,6 +437,7 @@ class WatchXApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("k", "kill_process", "Kill"),
+        Binding("b", "toggle_alert_beep", "Beep"),
         Binding("s", "focus_search", "Search"),
         Binding("t", "focus_table", "Table"),
         Binding("d", "focus_details", "Details"),
@@ -404,6 +453,7 @@ class WatchXApp(App):
         Binding("=", "increase_page_size", "More Rows", show=False),
         Binding("-", "decrease_page_size", "Fewer Rows", show=False),
     ]
+    alert_beep_enabled = False
 
     async def action_kill_process(self):
         table = self.query_one(ProcessTable)
@@ -450,6 +500,11 @@ class WatchXApp(App):
     def action_focus_table(self):
         self.query_one("#proc_table").focus()
         self.set_footer_text("Focus: Process Table")
+
+    def action_toggle_alert_beep(self):
+        self.alert_beep_enabled = not self.alert_beep_enabled
+        state = "ON" if self.alert_beep_enabled else "OFF"
+        self.set_footer_text(f"Alert beep: {state}")
 
     async def action_focus_details(self):
         await self.refresh_selected_process_details()
