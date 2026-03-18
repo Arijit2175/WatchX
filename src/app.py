@@ -6,29 +6,92 @@ from src.bars import static_bar
 from rich.text import Text
 import asyncio
 import psutil
+from collections import deque
 
 class SystemStats(Static):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cpu_history = deque(maxlen=24)
+        self.net_history = deque(maxlen=24)
+
+    def _sparkline(self, values):
+        if not values:
+            return "-"
+        bars = "▁▂▃▄▅▆▇█"
+        top = max(values)
+        if top <= 0:
+            return bars[0] * len(values)
+        return "".join(bars[min(7, int((value / top) * 7))] for value in values)
+
     async def on_mount(self):
         self.set_interval(2.0, self.refresh_stats)
         await self.refresh_stats()
 
     async def refresh_stats(self):
         stats = await asyncio.to_thread(get_system_stats)
+
+        def _fmt_rate(value):
+            units = ["B/s", "KB/s", "MB/s", "GB/s"]
+            unit_index = 0
+            while value >= 1024 and unit_index < len(units) - 1:
+                value /= 1024
+                unit_index += 1
+            return f"{value:.1f} {units[unit_index]}"
+
+        def _fmt_bytes(value):
+            units = ["B", "KB", "MB", "GB", "TB"]
+            unit_index = 0
+            while value >= 1024 and unit_index < len(units) - 1:
+                value /= 1024
+                unit_index += 1
+            return f"{value:.1f} {units[unit_index]}"
+
         cpu = static_bar(stats['cpu'], "green")
         mem = static_bar(stats['memory']['percent'], "yellow")
         disk = static_bar(stats['disk']['percent'], "magenta")
         net = stats['network']
+        net_speed = stats.get('network_speed', {'upload_per_sec': 0.0, 'download_per_sec': 0.0})
+        disk_io = stats.get('disk_io', {'read_bytes': 0, 'write_bytes': 0})
+        cores = stats.get('cpu_per_core', [])
         gpu = stats.get('gpu', {'name': 'None', 'load': 0, 'memory': 0})
+
+        self.cpu_history.append(float(stats['cpu']))
+        net_total_speed = float(net_speed['upload_per_sec']) + float(net_speed['download_per_sec'])
+        self.net_history.append(net_total_speed)
+
         gpu_color = "green" if gpu['load'] < 50 else ("yellow" if gpu['load'] < 80 else "red")
         gpu_bar = static_bar(gpu['load'], gpu_color)
         gpu_text = Text(f"GPU  {gpu['name']}\n", style="bold cyan") + gpu_bar + Text(f"  Mem: {gpu['memory']:.1f}%", style="bold magenta")
-        net_text = Text(f"Net: Sent {net['bytes_sent'] // (1024**2)} MB | Recv {net['bytes_recv'] // (1024**2)} MB", style="bold blue")
+
+        core_chunks = []
+        if cores:
+            for i in range(0, len(cores), 8):
+                chunk = " ".join([f"C{j}:{cores[j]:.0f}%" for j in range(i, min(i + 8, len(cores)))])
+                core_chunks.append(chunk)
+        core_text = Text("Core CPU:\n" + ("\n".join(core_chunks) if core_chunks else "N/A"), style="bold white")
+
+        cpu_trend = Text(f"CPU Trend: {self._sparkline(list(self.cpu_history))}", style="bright_green")
+        net_trend = Text(f"Net Trend: {self._sparkline(list(self.net_history))}", style="bright_blue")
+
+        net_text = Text(
+            f"Net: Sent {_fmt_bytes(net['bytes_sent'])} | Recv {_fmt_bytes(net['bytes_recv'])} "
+            f"| Up {_fmt_rate(net_speed['upload_per_sec'])} | Down {_fmt_rate(net_speed['download_per_sec'])}",
+            style="bold blue"
+        )
+        disk_io_text = Text(
+            f"Disk I/O: Read {_fmt_bytes(disk_io['read_bytes'])} | Write {_fmt_bytes(disk_io['write_bytes'])}",
+            style="bold bright_magenta"
+        )
         self.update(
             Text("CPU  ", style="bold cyan") + cpu + Text("\n") +
+            cpu_trend + Text("\n") +
+            core_text + Text("\n") +
             Text("MEM  ", style="bold cyan") + mem + Text("\n") +
             Text("DISK ", style="bold cyan") + disk + Text("\n") +
+            disk_io_text + Text("\n") +
             gpu_text + Text("\n") +
-            net_text
+            net_text + Text("\n") +
+            net_trend
         )
 
 class ProcessTable(DataTable):
