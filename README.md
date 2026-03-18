@@ -90,4 +90,35 @@ WatchX/
 
 ---
 
+## ⚙️ Functionality
+
+WatchX works in two layers: a launcher shell and the monitoring TUI.
+
+### 1) Launcher Flow
+- Running `python main.py` opens the WatchX command shell.
+- The shell accepts commands like `start`, `help`, `health`, `about`, `clear`, and `quit`.
+- `start` launches the live monitor interface.
+
+### 2) Live Metrics Pipeline
+- WatchX gathers system stats using `psutil` (CPU, memory, disk, network, process data).
+- GPU stats are collected via `GPUtil` when available.
+- Metrics refresh asynchronously to keep the UI responsive.
+
+### 3) Monitoring UI Behavior
+- The top area displays system metrics with progress bars and trend indicators.
+- The process table supports sorting, filtering, pagination, and row selection.
+- A details panel shows rich information about the currently selected process.
+
+### 4) Process Control
+- You can select a process using keyboard or mouse.
+- `k` sends a terminate signal to the selected PID.
+- Selection tracking is PID-based so it remains stable while rows reorder.
+
+### 5) Alerts & Feedback
+- CPU, memory, and disk thresholds trigger visual warning states.
+- Optional alert beep can be toggled for threshold transitions.
+- Footer/status lines provide action feedback and navigation context.
+
+---
+
 
